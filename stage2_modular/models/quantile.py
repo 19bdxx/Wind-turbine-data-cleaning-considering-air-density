@@ -365,7 +365,10 @@ def fit_quantile_mlp(Xtr, ytr, Xva, yva, taus, cfg=None, device="auto", verbose=
     sw.lap("prepare CPU tensors")
 
     # 根据数据大小决定训练模式
-    total_bytes = Xtr_cpu.element_size()*Xtr_cpu.nelement() + ytr_cpu.element_size()*ytr_cpu.nelement() +                   Xva_cpu.element_size()*Xva_cpu.nelement() + yva_cpu.element_size()*yva_cpu.nelement()
+    total_bytes = (Xtr_cpu.element_size() * Xtr_cpu.nelement() + 
+                   ytr_cpu.element_size() * ytr_cpu.nelement() +
+                   Xva_cpu.element_size() * Xva_cpu.nelement() + 
+                   yva_cpu.element_size() * yva_cpu.nelement())
     use_cached = use_cuda and (total_bytes <= gpu_cache_limit_bytes)
     mode = "GPU-CACHED" if use_cached else "STREAMING"
     print(f"[Quantile] bytes≈{total_bytes/1024**2:.1f}MiB; mode={mode}")
