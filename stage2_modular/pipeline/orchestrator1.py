@@ -270,6 +270,8 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
             turb_out=os.path.join(station_out, f"{tid}号机"); os.makedirs(turb_out, exist_ok=True)
             out_csv=os.path.join(turb_out, f"{station}_{label}_stage2_mlp.csv")
             df_out.to_csv(out_csv, index=False, encoding="utf-8-sig")
+            # 保存切分信息以便后续 run 复用
+            splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
             continue
 
         pr_used = prated_raw if math.isfinite(prated_raw) else float(np.nanmax(S["power"]))
@@ -376,6 +378,8 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
         turb_out=os.path.join(station_out, f"{tid}号机"); os.makedirs(turb_out, exist_ok=True)
         out_csv=os.path.join(turb_out, f"{station}_{label}_stage2_mlp.csv")
         df.to_csv(out_csv, index=False, encoding="utf-8-sig")
+        # 保存切分信息以便后续 run 复用
+        splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
         sw.lap("write csv")
 
     T.total(f"{station} station total")
