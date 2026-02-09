@@ -747,6 +747,144 @@ def _knn_search_kdtree(train_X, query_X, K, metric='euclidean'):
         print(f"[KDTree] 搜索失败，回退到原方法: {e}")
         return None, None
 
+# ===================== 候选集窗口筛选（进一步减少计算量）=====================
+
+def _filter_candidates_by_window(train_X, query_point, window_v, window_r, 
+                                  min_candidates, max_expand=3):
+    """
+    基于风速和空气密度范围筛选候选点，减少KNN搜索的计算量
+    
+    核心优化：
+    ----------
+    在计算距离前，先根据特征值范围筛选候选集，将计算量从 O(N) 降至 O(M)
+    
+    算法流程：
+    ----------
+    1. 初始窗口筛选：
+       - 风速范围：[ws - window_v, ws + window_v]
+       - 密度范围：[rho - window_r, rho + window_r]（若d=2）
+    
+    2. 动态扩展（若候选不足）：
+       - 若筛选后 M < min_candidates，窗口扩大 1.5 倍
+       - 最多扩展 max_expand 次
+       - 仍不足则返回全量索引（回退保护）
+    
+    3. 返回筛选后的索引
+    
+    复杂度对比：
+    ------------
+    - 原方法：对全量 N 个点计算距离
+    - 优化后：仅对 M ≈ α×N 个点计算（α 通常 0.1-0.3）
+    - 提速比：~1/α ≈ 3-10倍
+    
+    参数：
+    ------
+    train_X : ndarray, shape (N, d)
+        训练集特征，已标准化
+        - train_X[:, 0]：风速 V（标准化空间）
+        - train_X[:, 1]：空气密度 ρ（标准化空间，若d=2）
+    
+    query_point : ndarray, shape (d,)
+        查询点特征（标准化空间）
+    
+    window_v : float
+        风速窗口半径（标准化空间）
+        推荐值：
+        - MinMax归一化 [0,1]：0.05-0.15（对应原始空间 0.75-2.25 m/s，假设范围15m/s）
+        - Z-score归一化：0.3-0.8（对应 0.3-0.8 个标准差）
+    
+    window_r : float
+        空气密度窗口半径（标准化空间）
+        推荐值：
+        - MinMax归一化 [0,1]：0.1-0.3（对应原始空间 0.03-0.09 kg/m³，假设范围0.3）
+        - Z-score归一化：0.5-1.0（对应 0.5-1.0 个标准差）
+    
+    min_candidates : int
+        最小候选数量（通常设为 K 或 2K）
+        确保有足够的候选点进行 KNN
+    
+    max_expand : int, default=3
+        最大扩展次数
+        防止无限扩展，超过后回退到全量
+    
+    返回：
+    ------
+    indices : ndarray, shape (M,)
+        筛选后的候选点索引
+        - 若筛选成功：M < N, 0 <= indices < N
+        - 若回退全量：M = N, indices = [0, 1, ..., N-1]
+    
+    使用示例：
+    ----------
+    >>> # 对于查询点 query_X[i]，筛选候选集
+    >>> indices = _filter_candidates_by_window(
+    ...     train_X, query_X[i], 
+    ...     window_v=0.1, window_r=0.2, 
+    ...     min_candidates=500
+    ... )
+    >>> # 仅对筛选后的候选点计算距离
+    >>> train_X_filtered = train_X[indices]
+    >>> distances = compute_distances(query_X[i], train_X_filtered)
+    
+    注意事项：
+    ----------
+    1. **窗口大小选择**：
+       - 太小：频繁扩展，可能无筛选效果
+       - 太大：筛选不明显，优化有限
+       - 建议：根据数据密度和K值调优
+    
+    2. **标准化空间**：
+       - train_X 和 query_point 必须在同一标准化空间
+       - 窗口参数也需匹配该标准化方式
+    
+    3. **性能权衡**：
+       - 筛选本身有开销 O(N)，但远小于距离计算
+       - 当 M < 0.5N 时，总体加速明显
+    """
+    N, d = train_X.shape
+    
+    # 提取查询点的风速和密度
+    ws_q = query_point[0]  # 风速（第0维）
+    
+    # 初始窗口大小
+    current_window_v = window_v
+    current_window_r = window_r if d >= 2 else 0.0
+    
+    # 尝试扩展的次数
+    expand_count = 0
+    
+    while expand_count <= max_expand:
+        # 筛选风速范围
+        ws_mask = (train_X[:, 0] >= ws_q - current_window_v) & \
+                  (train_X[:, 0] <= ws_q + current_window_v)
+        
+        # 如果是2维（包含空气密度），同时筛选密度范围
+        if d >= 2:
+            rho_q = query_point[1]  # 空气密度（第1维）
+            rho_mask = (train_X[:, 1] >= rho_q - current_window_r) & \
+                       (train_X[:, 1] <= rho_q + current_window_r)
+            combined_mask = ws_mask & rho_mask
+        else:
+            combined_mask = ws_mask
+        
+        # 获取候选索引
+        indices = np.where(combined_mask)[0]
+        
+        # 检查候选数量是否足够
+        if len(indices) >= min_candidates:
+            # 筛选成功
+            return indices
+        
+        # 候选不足，扩大窗口
+        expand_count += 1
+        if expand_count <= max_expand:
+            current_window_v *= 1.5
+            current_window_r *= 1.5
+    
+    # 扩展达到上限仍不足，回退到全量
+    # 返回全部索引
+    return np.arange(N, dtype=np.int64)
+
 # ===================== KNN（GPU 批量 + 候选分块 + 行级 topK 合并） =====================
 
 class KNNLocal(ThresholdMethod):
@@ -1000,6 +1138,21 @@ class KNNLocal(ThresholdMethod):
         # 条件：(1) sklearn 可用  (2) 欧氏距离或可映射为欧氏  (3) 低维特征
         # 用户可通过 cfg["use_kdtree"]=False 强制禁用
         USE_KDTREE = bool(cfg.get("use_kdtree", True)) and SKLEARN_AVAILABLE
+        
+        # ========= 候选集窗口筛选配置：进一步减少计算量 =========
+        # 默认启用窗口筛选，在KNN搜索前根据风速和密度范围预筛选候选集
+        # 可通过 cfg["use_window_filter"]=False 禁用
+        USE_WINDOW_FILTER = bool(cfg.get("use_window_filter", True))
+        
+        # 窗口半径（标准化空间）
+        # MinMax [0,1]：window_v=0.1 约对应原始空间 1.5m/s（假设范围15m/s）
+        # Z-score：window_v=0.5 约对应 0.5 个标准差
+        WINDOW_V = float(cfg.get("window_v", 0.1))  # 风速窗口
+        WINDOW_R = float(cfg.get("window_r", 0.2))  # 空气密度窗口（仅d=2时使用）
+        
+        # 最小候选数：确保筛选后有足够的点进行KNN
+        # 设为2倍K可以保证有足够的多样性
+        MIN_CANDIDATES = int(cfg.get("min_candidates", max(K_NEI * 2, 1000)))
 
         # ========= 数据准备：确保输入为 numpy 浮点数组 =========
         train_X = np.asarray(train_X, float);    query_X = np.asarray(query_X, float)
@@ -1118,11 +1271,99 @@ class KNNLocal(ThresholdMethod):
                 train_X_phys = a_np + b_np * train_X  # (N,d)
                 query_X_phys = a_np + b_np * query_X  # (Q,d)
                 
-                distances_kd, indices_kd = _knn_search_kdtree(train_X_phys, query_X_phys, K_NEI, 'euclidean')
+                # ========= 窗口筛选优化（可选）=========
+                if USE_WINDOW_FILTER:
+                    print(f"[KNNLocal] Using window filtering (window_v={WINDOW_V}, window_r={WINDOW_R if d>=2 else 'N/A'})...", flush=True)
+                    # 对每个查询点应用窗口筛选
+                    # 这里先不用KDTree，改用逐点窗口筛选+局部KNN
+                    distances_kd = np.zeros((Q, K_NEI), dtype=np.float32)
+                    indices_kd = np.zeros((Q, K_NEI), dtype=np.int64)
+                    
+                    total_filtered = 0
+                    for qi in range(Q):
+                        # 筛选候选集
+                        cand_indices = _filter_candidates_by_window(
+                            train_X, query_X[qi], 
+                            WINDOW_V, WINDOW_R, 
+                            MIN_CANDIDATES
+                        )
+                        total_filtered += len(cand_indices)
+                        
+                        # 在筛选后的候选集上搜索KNN
+                        if len(cand_indices) < N:  # 筛选有效
+                            train_X_filtered = train_X[cand_indices]
+                            # 使用简单的欧氏距离计算（避免再构建KDTree）
+                            dists = np.linalg.norm(train_X_filtered - query_X[qi], axis=1)
+                            
+                            # 取前K个最近邻
+                            k_actual = min(K_NEI, len(dists))
+                            topk_idx = np.argpartition(dists, k_actual-1)[:k_actual]
+                            topk_idx = topk_idx[np.argsort(dists[topk_idx])]
+                            
+                            distances_kd[qi, :k_actual] = dists[topk_idx]
+                            indices_kd[qi, :k_actual] = cand_indices[topk_idx]
+                            
+                            # 填充不足的部分（如果有）
+                            if k_actual < K_NEI:
+                                distances_kd[qi, k_actual:] = np.inf
+                                indices_kd[qi, k_actual:] = -1
+                        else:
+                            # 回退到全量KDTree（窗口扩展失败）
+                            nbrs = NearestNeighbors(n_neighbors=K_NEI, algorithm='auto', metric='euclidean')
+                            nbrs.fit(train_X)
+                            dist, idx = nbrs.kneighbors(query_X[qi:qi+1], return_distance=True)
+                            distances_kd[qi] = dist[0]
+                            indices_kd[qi] = idx[0]
+                    
+                    avg_filtered = total_filtered / Q
+                    reduction = (1 - avg_filtered / N) * 100
+                    print(f"[KNNLocal] Window filtering: avg candidates {avg_filtered:.0f}/{N} ({reduction:.1f}% reduction)", flush=True)
+                else:
+                    # 不使用窗口筛选，直接KDTree搜索
+                    distances_kd, indices_kd = _knn_search_kdtree(train_X_phys, query_X_phys, K_NEI, 'euclidean')
             else:
                 # grad_dir/tanorm: 在标准化空间搜索
                 # 对于 physics 梯度模式，欧氏距离是合理近似
-                distances_kd, indices_kd = _knn_search_kdtree(train_X, query_X, K_NEI, 'euclidean')
+                if USE_WINDOW_FILTER:
+                    print(f"[KNNLocal] Using window filtering (window_v={WINDOW_V}, window_r={WINDOW_R if d>=2 else 'N/A'})...", flush=True)
+                    distances_kd = np.zeros((Q, K_NEI), dtype=np.float32)
+                    indices_kd = np.zeros((Q, K_NEI), dtype=np.int64)
+                    
+                    total_filtered = 0
+                    for qi in range(Q):
+                        cand_indices = _filter_candidates_by_window(
+                            train_X, query_X[qi], 
+                            WINDOW_V, WINDOW_R, 
+                            MIN_CANDIDATES
+                        )
+                        total_filtered += len(cand_indices)
+                        
+                        if len(cand_indices) < N:
+                            train_X_filtered = train_X[cand_indices]
+                            dists = np.linalg.norm(train_X_filtered - query_X[qi], axis=1)
+                            
+                            k_actual = min(K_NEI, len(dists))
+                            topk_idx = np.argpartition(dists, k_actual-1)[:k_actual]
+                            topk_idx = topk_idx[np.argsort(dists[topk_idx])]
+                            
+                            distances_kd[qi, :k_actual] = dists[topk_idx]
+                            indices_kd[qi, :k_actual] = cand_indices[topk_idx]
+                            
+                            if k_actual < K_NEI:
+                                distances_kd[qi, k_actual:] = np.inf
+                                indices_kd[qi, k_actual:] = -1
+                        else:
+                            nbrs = NearestNeighbors(n_neighbors=K_NEI, algorithm='auto', metric='euclidean')
+                            nbrs.fit(train_X)
+                            dist, idx = nbrs.kneighbors(query_X[qi:qi+1], return_distance=True)
+                            distances_kd[qi] = dist[0]
+                            indices_kd[qi] = idx[0]
+                    
+                    avg_filtered = total_filtered / Q
+                    reduction = (1 - avg_filtered / N) * 100
+                    print(f"[KNNLocal] Window filtering: avg candidates {avg_filtered:.0f}/{N} ({reduction:.1f}% reduction)", flush=True)
+                else:
+                    distances_kd, indices_kd = _knn_search_kdtree(train_X, query_X, K_NEI, 'euclidean')
             
             # 检查 KDTree 搜索是否成功
             if distances_kd is not None and indices_kd is not None:
@@ -1174,6 +1415,29 @@ class KNNLocal(ThresholdMethod):
 
         # ========= 原始方法：批处理循环（仅在未使用KDTree时执行）=========
         if not used_kdtree:
+            # ========= 窗口筛选预处理（可选，用于GPU路径）=========
+            # 对于GPU路径，为每个查询点预先计算候选mask
+            # 这样可以在GPU距离计算时跳过不在窗口内的候选点
+            if USE_WINDOW_FILTER and not use_gpu:  # CPU模式下使用窗口筛选
+                print(f"[KNNLocal] Applying window filtering for CPU batch processing...", flush=True)
+                # 预计算每个查询点的候选索引
+                query_candidates = []
+                total_filtered = 0
+                for qi in range(Q):
+                    cand_indices = _filter_candidates_by_window(
+                        train_X, query_X[qi], 
+                        WINDOW_V, WINDOW_R, 
+                        MIN_CANDIDATES
+                    )
+                    query_candidates.append(cand_indices)
+                    total_filtered += len(cand_indices)
+                
+                avg_filtered = total_filtered / Q
+                reduction = (1 - avg_filtered / N) * 100
+                print(f"[KNNLocal] Window filtering: avg candidates {avg_filtered:.0f}/{N} ({reduction:.1f}% reduction)", flush=True)
+            else:
+                query_candidates = None  # 不使用窗口筛选
+            
             # 外层循环：遍历查询批次（每批 BATCH_Q 个点）
             # 内层循环：遍历候选分块（每块 TRAIN_CHUNK 个样本）
             # 双层循环实现 O(Q×N/chunk) 的内存复杂度
