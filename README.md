@@ -8,13 +8,15 @@
 
 - **空气密度修正**: 考虑空气密度对功率曲线的影响
 - **KNN 局部阈值**: 基于局部加权分位数的异常检测
+- **窗口筛选优化**: 
+  - **主要优化方法**：通过风速和空气密度范围预筛选候选点 ⭐
+  - 50-80% 候选点缩减，显著减少计算量
+  - 简单直观，物理意义明确
+  - GPU 和 CPU 都支持
 - **GPU 加速**: 
   - **支持 NVIDIA GPU（CUDA）**，大规模数据显著提速 ✅
   - GPU + 窗口筛选组合获得最佳性能
   - 自动检测并使用可用 GPU
-- **CPU 优化**: 
-  - KDTree 空间索引（2-4倍加速）
-  - 候选集窗口筛选（50-80%候选点缩减）
 - **模块化设计**: 核心功能、模型、阈值方法分离
 - **批量处理**: 支持多站点、多风机、多实验方案
 
@@ -30,8 +32,6 @@
 
 - ✅ **有 GPU**: 使用 GPU 模式（推荐，更快）
 - ✅ **无 GPU**: 自动降级到 CPU 模式（仍有优化）
-
-详细对比请参阅：[GPU_VS_CPU_GUIDE.md](GPU_VS_CPU_GUIDE.md)
 
 ### 1. 安装依赖
 
@@ -79,24 +79,12 @@ python benchmark_knn.py
 
 ## 📖 文档
 
-- **[GPU_VS_CPU_GUIDE.md](GPU_VS_CPU_GUIDE.md)** - GPU vs CPU 选择指南（⭐推荐阅读）
-  - GPU 和 CPU 性能对比
-  - 设备配置方法
-  - 根据数据规模选择设备
-  - 常见问题排查
-
-- **[USER_GUIDE.md](USER_GUIDE.md)** - 完整使用指南
+- **[USER_GUIDE.md](USER_GUIDE.md)** - 完整使用指南（⭐推荐阅读）
   - 详细安装步骤
-  - 配置参数说明
+  - 配置参数说明（窗口筛选等）
   - 运行方法和示例
-  - 性能对比方法
+  - 性能对比和调优
   - 故障排查
-
-- **[OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)** - 优化技术详解
-  - KDTree 空间索引原理
-  - 窗口筛选算法
-  - 配置参数调优
-  - 性能测试结果
 
 - **[CODE_REVIEW_ISSUES.md](CODE_REVIEW_ISSUES.md)** - 代码审查结果
   - 已识别的问题
@@ -142,9 +130,9 @@ python benchmark_knn.py
     "device": "cuda:0",              // 使用GPU
     "thresholds": {
       "k_nei": 500,
-      "use_window_filter": true,     // 窗口筛选
-      "window_v": 0.1,
-      "window_r": 0.2
+      "use_window_filter": true,     // 窗口筛选（主要优化）
+      "window_v": 0.1,               // 风速窗口
+      "window_r": 0.2                // 密度窗口
     }
   }
 }
@@ -158,8 +146,7 @@ python benchmark_knn.py
     "device": "cpu",                 // 使用CPU
     "thresholds": {
       "k_nei": 500,
-      "use_kdtree": true,            // KDTree优化
-      "use_window_filter": true,
+      "use_window_filter": true,     // 窗口筛选
       "window_v": 0.1,
       "window_r": 0.2
     }
@@ -173,8 +160,7 @@ python benchmark_knn.py
 {
   "defaults": {
     "thresholds": {
-      "use_kdtree": false,
-      "use_window_filter": false
+      "use_window_filter": false     // 禁用窗口筛选
     }
   }
 }
@@ -186,26 +172,23 @@ python benchmark_knn.py
 
 ## 📊 性能表现
 
-### GPU vs CPU 对比（N=50,000）
+### 窗口筛选效果（N=50,000）
 
-| 模式 | 耗时 | 提速比 | 推荐场景 |
-|------|------|--------|----------|
-| GPU（原始） | ~2.7秒 | 1.0x | 基线 |
-| GPU + 窗口筛选 | ~1.5秒 | **1.8x** ✅ | **推荐**（大数据） |
-| CPU + KDTree | ~0.7秒 | 3.9x | 中小数据 |
+| 模式 | 耗时 | 提速比 | 候选筛除率 |
+|------|------|--------|-----------|
+| GPU（原始） | ~2.7秒 | 1.0x | 0% |
+| **GPU + 窗口筛选** | **~1.5秒** | **1.8x** ✅ | **70%** |
 
 ### 不同规模表现
 
-| 数据规模 | GPU+窗口筛选 | CPU+KDTree | 推荐 |
-|---------|-------------|-----------|------|
-| N < 10K | 0.2秒 | 0.1秒 | 都可 |
-| 10K-50K | 0.5-1.5秒 | 0.3-0.7秒 | GPU ✅ |
-| 50K-100K | 1.5-4秒 | 0.7-2.5秒 | GPU ✅ |
-| N > 100K | 4-20秒+ | 2.5-20秒+ | **GPU** ✅ |
+| 数据规模 | GPU+窗口筛选 | 推荐 |
+|---------|-------------|------|
+| N < 10K | 0.2秒 | ✅ |
+| 10K-50K | 0.5-1.5秒 | ✅ |
+| 50K-100K | 1.5-4秒 | **✅ 推荐** |
+| N > 100K | 4-20秒+ | **✅ 推荐** |
 
-详细性能测试请参考：
-- [GPU_VS_CPU_GUIDE.md](GPU_VS_CPU_GUIDE.md) - 设备选择
-- [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md) - 优化详解
+详细说明请参考 [USER_GUIDE.md](USER_GUIDE.md)。
 
 ---
 
@@ -217,9 +200,12 @@ python benchmark_knn.py
 
 ### 主要优化
 
-1. **KDTree 空间索引** - 从 O(Q×N) 降至 O(N log N + Q×K×log N)
-2. **窗口筛选** - 预筛选候选集，减少距离计算
-3. **批处理** - GPU/CPU 分块处理，控制内存
+1. **窗口筛选** - 通过风速和空气密度范围预筛选候选点（主要优化方法）⭐
+   - 50-80% 候选点缩减
+   - 简单直观，物理意义明确
+   - GPU 和 CPU 都支持
+
+2. **批处理** - GPU/CPU 分块处理，控制内存
 
 ### 测试
 
@@ -237,11 +223,11 @@ python test_knn_optimization.py
 
 ### 2026-02-09
 
-- ✅ 实现 KDTree 空间索引优化
-- ✅ 实现候选集窗口筛选
+- ✅ 实现候选集窗口筛选（主要优化）
 - ✅ 添加配置参数到 JSON
 - ✅ 创建自动化性能测试脚本
 - ✅ 完善中文注释和文档
+- ✅ 精简文档文件（10个→3个）
 
 ### 历史提交
 
