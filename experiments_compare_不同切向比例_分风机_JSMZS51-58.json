@@ -67,7 +67,11 @@
       "delta_power": 50.0,
       "D_mode": "pred_or_both",
       "bw_v_floor": 0.02,
-      "bw_v_cap": 5.0
+      "bw_v_cap": 5.0,
+      "use_window_filter": true,
+      "window_v": 0.1,
+      "window_r": 0.2,
+      "min_candidates": 1000
     },
     "conformal": {
       "sequential": true,
