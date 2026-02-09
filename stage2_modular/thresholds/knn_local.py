@@ -1134,10 +1134,12 @@ class KNNLocal(ThresholdMethod):
         BATCH_Q     = int(cfg.get("knn_batch_q", 2048))
         TRAIN_CHUNK = int(cfg.get("knn_train_chunk", 65536))
         
-        # ========= KDTree 优化开关：默认启用（当条件满足时）=========
-        # 条件：(1) sklearn 可用  (2) 欧氏距离或可映射为欧氏  (3) 低维特征
-        # 用户可通过 cfg["use_kdtree"]=False 强制禁用
-        USE_KDTREE = bool(cfg.get("use_kdtree", True)) and SKLEARN_AVAILABLE
+        # ========= KDTree 优化开关：默认禁用 =========
+        # 注意：窗口筛选（风速+密度范围）已经能有效减少计算量（50%-80%筛除率）
+        # KDTree 仅作为可选的额外优化保留，默认不启用
+        # 原因：(1) 只支持CPU  (2) 增加复杂度  (3) 在窗口筛选后收益有限
+        # 用户可通过 cfg["use_kdtree"]=True 手动启用（不推荐）
+        USE_KDTREE = bool(cfg.get("use_kdtree", False)) and SKLEARN_AVAILABLE
         
         # ========= 候选集窗口筛选配置：进一步减少计算量 =========
         # 默认启用窗口筛选，在KNN搜索前根据风速和密度范围预筛选候选集
