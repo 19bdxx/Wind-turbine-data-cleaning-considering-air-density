@@ -131,6 +131,72 @@ def _physics_dir_in_z_batch(Z_b, minmax):
     gx1 = V ** 3
     return np.stack([gx0, gx1], axis=1)
 
+# ===================== 窗口筛选 =====================
+
+def _window_filter_candidates(Zb_t, Xcand_t, window_v, window_r, d, min_candidates, K_NEI):
+    """
+    对每个查询点，根据风速和密度窗口筛选候选点
+    
+    参数:
+        Zb_t: (B,d) 查询点（z空间）
+        Xcand_t: (N,d) 候选点（z空间）
+        window_v: 风速窗口半径
+        window_r: 空气密度窗口半径（当d=2时使用）
+        d: 特征维度 (1或2)
+        min_candidates: 最小候选数阈值
+        K_NEI: K近邻数
+        
+    返回:
+        filtered_indices: list of (B,) torch.Tensor，每个查询点的候选索引
+        expand_count: 扩展次数统计
+    """
+    B = Zb_t.shape[0]
+    N = Xcand_t.shape[0]
+    device = Zb_t.device
+    
+    filtered_indices = []
+    expand_count = 0
+    max_expansions = 3
+    
+    for bi in range(B):
+        query_point = Zb_t[bi]  # (d,)
+        current_window_v = window_v
+        current_window_r = window_r
+        expansion = 0
+        
+        while expansion <= max_expansions:
+            # 风速维度筛选
+            ws_mask = torch.abs(Xcand_t[:, 0] - query_point[0]) <= current_window_v
+            
+            # 如果是2维，加上密度维度筛选
+            if d == 2:
+                rho_mask = torch.abs(Xcand_t[:, 1] - query_point[1]) <= current_window_r
+                mask = ws_mask & rho_mask
+            else:
+                mask = ws_mask
+            
+            candidate_indices = torch.where(mask)[0]
+            n_candidates = len(candidate_indices)
+            
+            # 检查候选数是否足够
+            if n_candidates >= max(K_NEI, min_candidates):
+                filtered_indices.append(candidate_indices)
+                if expansion > 0:
+                    expand_count += 1
+                break
+            
+            # 扩大窗口
+            expansion += 1
+            if expansion <= max_expansions:
+                current_window_v *= 1.5
+                current_window_r *= 1.5
+        else:
+            # 达到最大扩展次数仍不足，使用全部候选
+            filtered_indices.append(torch.arange(N, device=device))
+            expand_count += 1
+    
+    return filtered_indices, expand_count
+
 # ===================== 批量 GPU 距离（B×C 分块） =====================
 
 def _distances_chunk(metric, Zb_t, Xc_t, *,
@@ -223,6 +289,12 @@ class KNNLocal(ThresholdMethod):
         K_NEI       = int(cfg.get("k_nei", 500))
         BATCH_Q     = int(cfg.get("knn_batch_q", 2048))
         TRAIN_CHUNK = int(cfg.get("knn_train_chunk", 65536))
+        
+        # ========= 窗口筛选配置 =========
+        use_window_filter = cfg.get("use_window_filter", True)
+        window_v = float(cfg.get("window_v", 0.1))
+        window_r = float(cfg.get("window_r", 0.2))
+        min_candidates = int(cfg.get("min_candidates", 1000))
 
         # ========= 数据准备 =========
         train_X = np.asarray(train_X, float);    query_X = np.asarray(query_X, float)
@@ -294,6 +366,12 @@ class KNNLocal(ThresholdMethod):
         Xcand_z_t = torch.as_tensor(train_X, dtype=torch.float32, device=torch_device)  # (N,d)
         N = int(Xcand_z_t.shape[0]); Q = int(query_X.shape[0])
         print(f"[KNNLocal] Xcand tensor on {Xcand_z_t.device}, shape={tuple(Xcand_z_t.shape)}", flush=True)
+        
+        # ========= 窗口筛选状态 =========
+        if use_window_filter:
+            print(f"[KNNLocal] Window filtering enabled: window_v={window_v}, window_r={window_r}, min_candidates={min_candidates}", flush=True)
+        else:
+            print(f"[KNNLocal] Window filtering disabled - using full candidate set", flush=True)
 
         # ========= physics 常量 =========
         a_t = b_t = None
@@ -308,6 +386,10 @@ class KNNLocal(ThresholdMethod):
         # ========= 输出容器 =========
         q_hi = np.full((Q,), np.nan, float)
         q_lo = np.full((Q,), np.nan, float)
+        
+        # ========= 窗口筛选统计 =========
+        total_window_expansions = 0
+        total_candidates_filtered = 0
 
         # ========= 批处理循环：查询按 B ；候选按 C =========
         for s in range(0, Q, BATCH_Q):
@@ -354,35 +436,82 @@ class KNNLocal(ThresholdMethod):
             best_d = torch.full((B, K_NEI), float("inf"), dtype=torch.float32, device=torch_device)
             best_i = torch.full((B, K_NEI), -1, dtype=torch.int64, device=torch_device)
 
-            # --- 候选分块遍历 ---
-            for c0 in range(0, N, TRAIN_CHUNK):
-                c1 = min(N, c0 + TRAIN_CHUNK)
-                Xc_t = Xcand_z_t[c0:c1, :]            # (C,d)
-                C = c1 - c0
+            # --- 窗口筛选或全量计算 ---
+            if use_window_filter:
+                # 对本批查询应用窗口筛选
+                filtered_indices, expand_count = _window_filter_candidates(
+                    Zb_t, Xcand_z_t, window_v, window_r, d, min_candidates, K_NEI
+                )
+                total_window_expansions += expand_count
+                
+                # 对每个查询点，使用筛选后的候选计算距离
+                for bi in range(B):
+                    cand_idx = filtered_indices[bi]
+                    n_cand = len(cand_idx)
+                    total_candidates_filtered += n_cand
+                    
+                    if n_cand == 0:
+                        continue
+                    
+                    # 获取筛选后的候选点
+                    Xc_t = Xcand_z_t[cand_idx, :]  # (n_cand, d)
+                    Zb_single = Zb_t[bi:bi+1, :]    # (1, d)
+                    
+                    # 计算距离
+                    if metric == "physics":
+                        Xi_x_single = a_t + b_t * Zb_single
+                        Gx_single = _physics_grad_x_batch(Xi_x_single)
+                        Xx_c_t = a_t + b_t * Xc_t
+                        D_row = _distances_chunk("physics", Zb_single, Xc_t,
+                                                 lambda_t=lambda_t,
+                                                 a_t=a_t, b_t=b_t, Gx_b_t=Gx_single, Xx_c_t=Xx_c_t,
+                                                 physics_relative=physics_relative)  # (1, n_cand)
+                        D_row = D_row.squeeze(0)  # (n_cand,)
+                    else:
+                        U_single = U_b_t[bi:bi+1, :]  # (1, d)
+                        D_row = _distances_chunk(metric, Zb_single, Xc_t,
+                                                 lambda_t=lambda_t,
+                                                 U_b_t=U_single,
+                                                 physics_relative=physics_relative)  # (1, n_cand)
+                        D_row = D_row.squeeze(0)  # (n_cand,)
+                    
+                    # 选择 topK
+                    k_actual = min(K_NEI, n_cand)
+                    if k_actual > 0:
+                        topk_vals, topk_idx_local = torch.topk(D_row, k=k_actual, largest=False, sorted=False)
+                        best_d[bi, :k_actual] = topk_vals
+                        best_i[bi, :k_actual] = cand_idx[topk_idx_local]
+            else:
+                # 原始的候选分块遍历（无窗口筛选）
+                for c0 in range(0, N, TRAIN_CHUNK):
+                    c1 = min(N, c0 + TRAIN_CHUNK)
+                    Xc_t = Xcand_z_t[c0:c1, :]            # (C,d)
+                    C = c1 - c0
 
-                if metric == "physics":
-                    Xx_c_t = a_t + b_t * Xc_t           # (C,d)
-                    D_chunk = _distances_chunk("physics", Zb_t, Xc_t,
-                                                lambda_t=lambda_t,
-                                                a_t=a_t, b_t=b_t, Gx_b_t=Gx_b_t, Xx_c_t=Xx_c_t,
-                                                physics_relative=physics_relative)   # (B,C)
-                else:
-                    D_chunk = _distances_chunk(metric, Zb_t, Xc_t,
-                                                lambda_t=lambda_t,
-                                                U_b_t=U_b_t,
-                                                physics_relative=physics_relative)   # (B,C)
+                    if metric == "physics":
+                        Xx_c_t = a_t + b_t * Xc_t           # (C,d)
+                        D_chunk = _distances_chunk("physics", Zb_t, Xc_t,
+                                                    lambda_t=lambda_t,
+                                                    a_t=a_t, b_t=b_t, Gx_b_t=Gx_b_t, Xx_c_t=Xx_c_t,
+                                                    physics_relative=physics_relative)   # (B,C)
+                    else:
+                        D_chunk = _distances_chunk(metric, Zb_t, Xc_t,
+                                                    lambda_t=lambda_t,
+                                                    U_b_t=U_b_t,
+                                                    physics_relative=physics_relative)   # (B,C)
 
-                # 合并到本批 topK：把已有 K 与本块 C 拼接，再取前 K
-                idx_block = torch.arange(c0, c1, device=torch_device).view(1, C).expand(B, C)
-                cand_d = torch.cat([best_d, D_chunk], dim=1)              # (B, K+C)
-                cand_i = torch.cat([best_i, idx_block], dim=1)            # (B, K+C)
-                dvals, idx = torch.topk(cand_d, k=K_NEI, dim=1, largest=False, sorted=False)
-                rows = torch.arange(B, device=torch_device).view(B, 1)
-                best_d = dvals
-                best_i = cand_i[rows, idx]
+                    # 合并到本批 topK：把已有 K 与本块 C 拼接，再取前 K
+                    idx_block = torch.arange(c0, c1, device=torch_device).view(1, C).expand(B, C)
+                    cand_d = torch.cat([best_d, D_chunk], dim=1)              # (B, K+C)
+                    cand_i = torch.cat([best_i, idx_block], dim=1)            # (B, K+C)
+                    dvals, idx = torch.topk(cand_d, k=K_NEI, dim=1, largest=False, sorted=False)
+                    rows = torch.arange(B, device=torch_device).view(B, 1)
+                    best_d = dvals
+                    best_i = cand_i[rows, idx]
 
-                # 释放临时张量，降低峰值
-                del D_chunk, idx_block, cand_d, cand_i, dvals, idx
+                    # 释放临时张量，降低峰值
+                    del D_chunk, idx_block, cand_d, cand_i, dvals, idx
+
 
             # --- 将本批 topK 拉回 CPU，做核权重和加权分位 ---
             best_d_np = best_d.detach().cpu().numpy()   # (B,K)
@@ -408,6 +537,12 @@ class KNNLocal(ThresholdMethod):
             else:
                 del U_b_t
             torch.cuda.empty_cache()
+
+        # ========= 窗口筛选统计总结 =========
+        if use_window_filter:
+            avg_candidates = total_candidates_filtered / Q if Q > 0 else 0
+            filter_ratio = (1.0 - avg_candidates / N) * 100 if N > 0 else 0
+            print(f"[KNNLocal] Window filtering stats: avg_candidates={avg_candidates:.1f}/{N} ({filter_ratio:.1f}% filtered), expansions={total_window_expansions}/{Q}", flush=True)
 
         # ========= 验证集 conformal 标定 =========
         val_mask = np.asarray(idx_val_mask, bool)
