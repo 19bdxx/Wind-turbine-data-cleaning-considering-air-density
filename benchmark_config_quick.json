@@ -107,8 +107,8 @@
     {
       "name": "JMZSFD",
       "csv": "JMZSFD_空气密度_20230921-20240729_1min.csv",
-      "turbine_start": 55,
-      "turbine_end": 55
+      "turbine_start": 51,
+      "turbine_end": 58
     },
     {
       "name": "GRJHFD",
@@ -124,7 +124,6 @@
       "clean_mode": "A",
       "cleaning_passes": 0
     },
-
     {
       "name": "C1_knn_wind_rho_bwR010",
       "out_subdir": "C1_knn_wind_rho_bwR010",
@@ -136,65 +135,6 @@
       "thresholds": {
         "method": "knn",
         "bw_r": 0.1
-      }
-    },
-
-    {
-      "name": "C1a_knn_wind_rho_tanorm_0.1",
-      "out_subdir": "C1a_knn_wind_rho_tanorm_0.1",
-      "clean_mode": "C",
-      "cleaning_passes": 2,
-      "reuse_split_from": "A_rules_only",
-      "rho_for_clean": true,
-      "rho_for_model": true,
-      "thresholds": {
-        "method": "knn",
-        "metric": "tanorm",
-        "lambda_t": 0.1,
-        "grad_mode": "auto",
-        "grad_eps": [
-          0.1,
-          0.01
-        ]
-      }
-    },
-
-    {
-      "name": "C1a_knn_wind_rho_tanorm_0",
-      "out_subdir": "C1a_knn_wind_rho_tanorm_0",
-      "clean_mode": "C",
-      "cleaning_passes": 2,
-      "reuse_split_from": "A_rules_only",
-      "rho_for_clean": true,
-      "rho_for_model": true,
-      "thresholds": {
-        "method": "knn",
-        "metric": "tanorm",
-        "lambda_t": 0,
-        "grad_mode": "auto",
-        "grad_eps": [
-          0.1,
-          0.01
-        ]
-      }
-    },
-
-    {
-      "name": "C1b_knn_wind_rho_grad",
-      "out_subdir": "C1b_knn_wind_rho_grad",
-      "clean_mode": "C",
-      "cleaning_passes": 2,
-      "reuse_split_from": "A_rules_only",
-      "rho_for_clean": true,
-      "rho_for_model": true,
-      "thresholds": {
-        "method": "knn",
-        "metric": "grad_dir",
-        "grad_mode": "auto",
-        "grad_eps": [
-          0.1,
-          0.01
-        ]
       }
     }
   ]
