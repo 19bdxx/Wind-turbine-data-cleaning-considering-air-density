@@ -1,0 +1,141 @@
+{
+  "defaults": {
+    "stage1_root": "风机数据",
+    "out_root": "#5_runs_不同切向比例_分风机",
+    "device": "cuda:0",
+    "seed": 42,
+    "wind_scope": [
+      0.0,
+      15.0
+    ],
+    "min_train_samples": 1000,
+    "gpu_cache_mib": 24576,
+    "force_drop_rho_na": true,
+    "save_splits": true,
+    "splits_dir": "#splits_cache",
+    "knn_batch_q": 16384,
+    "knn_train_chunk": 131072,
+    "split": {
+      "strategy": "shuffle",
+      "block_freq": "D",
+      "ratio": [
+        0.8,
+        0.2,
+        0
+      ]
+    },
+    "scaler": {
+      "method": "minmax",
+      "fixed": true,
+      "wind_range": [
+        0,
+        15
+      ],
+      "rho_range": [
+        1.07,
+        1.37
+      ]
+    },
+    "mlp": {
+      "hidden": [
+        512,
+        512,
+        256,
+        128
+      ],
+      "act": "relu",
+      "dropout": 0.05,
+      "l2": 0.0,
+      "lr": 0.001,
+      "batch": 65536,
+      "epochs": 300,
+      "patience": 20,
+      "loss": "mse",
+      "huber_delta_z": 1.0
+    },
+    "thresholds": {
+      "bw_mode": "equiv_power",
+      "bw_v": 0.1,
+      "bw_r": 0.1,
+      "k_nei": 500,
+      "k_nei_min": 300,
+      "k_nei_max": 800,
+      "min_eff_mass": 50,
+      "tau_hi": 0.98,
+      "tau_lo": 0.98,
+      "eps_ratio": 0.05,
+      "delta_power": 50.0,
+      "D_mode": "pred_or_both",
+      "bw_v_floor": 0.02,
+      "bw_v_cap": 5.0,
+      "use_window_filter": true,
+      "window_v": 0.1,
+      "window_r": 0.2,
+      "min_candidates": 1000
+    },
+    "conformal": {
+      "sequential": true,
+      "union_target_total": 0.04,
+      "union_target_split": [
+        0.02,
+        0.02
+      ]
+    },
+    "rho_shuffle": {
+      "seed": 2024,
+      "granularity": "split"
+    },
+    "rho_constant_value": "train_mean",
+    "debug": {
+      "dump_coverage": true,
+      "coverage_bins": {
+        "wind_step": 0.5,
+        "rho_bins": 10,
+        "rho_binning": "quantile"
+      },
+      "dump_knn_diag": false,
+      "knn_diag_points": 100
+    },
+    "split_repo": {
+      "dir": "#5_runs_不同切向比例_分风机/_splits",
+      "key": "v1",
+      "load": true,
+      "save": true
+    }
+  },
+  "stations": [
+    {
+      "name": "JMZSFD",
+      "csv": "JMZSFD_空气密度_20230921-20240729_1min.csv",
+      "turbine_start": 51,
+      "turbine_end": 58
+    },
+    {
+      "name": "GRJHFD",
+      "csv": "GRJHFD_空气密度_20230921-20240729_1min.csv",
+      "turbine_start": 31,
+      "turbine_end": 31
+    }
+  ],
+  "runs": [
+    {
+      "name": "A_rules_only",
+      "out_subdir": "A_rules_only",
+      "clean_mode": "A",
+      "cleaning_passes": 0
+    },
+    {
+      "name": "C1_knn_wind_rho_bwR010",
+      "out_subdir": "C1_knn_wind_rho_bwR010",
+      "clean_mode": "C",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": true,
+      "rho_for_model": true,
+      "thresholds": {
+        "method": "knn",
+        "bw_r": 0.1
+      }
+    }
+  ]
+}

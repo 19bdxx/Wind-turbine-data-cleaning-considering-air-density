@@ -5,9 +5,18 @@ KNN 优化自动化基准测试脚本
 
 功能:
     自动运行多种 KNN 优化配置组合，提取性能指标并生成对比报告
+    
+    注意: 此脚本用于快速验证KNN优化效果，不是完整实验流程
 
 使用方法:
-    python benchmark_knn.py [--config <基础配置文件>] [--output <报告文件>]
+    # 快速测试（推荐，5-10分钟）
+    python benchmark_knn.py --quick-test
+    
+    # 完整测试（4-5小时，使用完整配置）
+    python benchmark_knn.py
+    
+    # 自定义配置
+    python benchmark_knn.py --config <配置文件> [--output <报告文件>]
 
 输出:
     - 控制台打印性能对比表格
@@ -81,12 +90,12 @@ def run_config(config_file, name, save_log=True):
             ['python', 'main.py', '--config', config_file],
             capture_output=True,
             text=True,
-            timeout=3600  # 1小时超时
+            timeout=7200  # 2小时超时（足够完整配置运行）
         )
         success = result.returncode == 0
         output = result.stdout + result.stderr
     except subprocess.TimeoutExpired:
-        print("❌ 运行超时（1小时）")
+        print("❌ 运行超时（2小时）")
         return None
     except Exception as e:
         print(f"❌ 运行失败: {e}")
@@ -246,8 +255,14 @@ def generate_report(results, output_file):
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
-        description="KNN 优化自动化基准测试",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description="KNN 优化自动化基准测试\n\n"
+                    "注意: 此脚本用于验证KNN优化效果，不是完整实验流程。\n"
+                    "完整配置包含20个runs，需要4-5小时。建议使用--quick-test快速验证。",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="示例:\n"
+               "  快速测试（推荐）:  python benchmark_knn.py --quick-test\n"
+               "  完整测试:         python benchmark_knn.py\n"
+               "  自定义配置:       python benchmark_knn.py --config my_config.json"
     )
     parser.add_argument(
         '--config',
@@ -260,6 +275,11 @@ def main():
         help='输出报告文件路径（默认: benchmark_report.md）'
     )
     parser.add_argument(
+        '--quick-test',
+        action='store_true',
+        help='快速测试模式：使用简化配置（2个runs），5-10分钟完成'
+    )
+    parser.add_argument(
         '--skip-baseline',
         action='store_true',
         help='跳过基线测试（无优化）'
@@ -267,15 +287,40 @@ def main():
     
     args = parser.parse_args()
     
+    # 快速测试模式：使用简化配置
+    if args.quick_test:
+        args.config = 'benchmark_config_quick.json'
+        print("⚡ 快速测试模式：使用简化配置（2个runs）")
+        print("   预计耗时：5-10分钟")
+        print()
+    
     # 检查基础配置文件是否存在
     if not Path(args.config).exists():
         print(f"❌ 配置文件不存在: {args.config}")
-        print("提示: 请确保配置文件路径正确，或使用 --config 指定")
+        if args.quick_test:
+            print("提示: 快速测试需要 benchmark_config_quick.json 文件")
+            print("      请确保该文件存在，或运行不带 --quick-test 的完整测试")
+        else:
+            print("提示: 请确保配置文件路径正确，或使用 --config 指定")
+            print("      或使用 --quick-test 进行快速测试")
         return 1
     
     print("🚀 KNN 优化自动化基准测试")
     print(f"基础配置: {args.config}")
     print(f"输出报告: {args.output}")
+    
+    # 读取配置以显示runs数量
+    try:
+        with open(args.config, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+            n_runs = len(config_data.get('runs', []))
+            print(f"配置包含: {n_runs} 个 runs")
+            if n_runs > 5:
+                print(f"⚠️  注意: 配置包含 {n_runs} 个runs，预计需要 {n_runs * 4 * 3 // 60}-{n_runs * 4 * 5 // 60} 小时")
+                print("   建议使用 --quick-test 进行快速验证")
+    except:
+        pass
+    
     print()
     
     results = []
