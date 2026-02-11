@@ -59,6 +59,11 @@ The window parameters are in **normalized space** (e.g., MinMax [0,1] or Z-score
 - `window_v = 0.1` ≈ ±1.5 m/s in physical space
 - `window_r = 0.2` ≈ ±0.06 kg/m³ in physical space
 
+*Note: These conversions assume the scaler configuration from the main config file:*
+- *`wind_range: [0, 15]` → 15 m/s full range → 0.1 × 15 = 1.5 m/s*
+- *`rho_range: [1.07, 1.37]` → 0.3 kg/m³ full range → 0.2 × 0.3 = 0.06 kg/m³*
+- *Your conversions may differ based on your scaler settings*
+
 **For Z-score Normalization:**
 - `window_v = 0.5` ≈ 0.5σ (standard deviations)
 - `window_r = 1.0` ≈ 1.0σ

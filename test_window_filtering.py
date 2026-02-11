@@ -10,7 +10,7 @@ import os
 # 添加 stage2_modular 到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'stage2_modular'))
 
-from thresholds.knn_local import _window_filter_candidates
+from thresholds.knn_local import _window_filter_candidates, MAX_WINDOW_EXPANSIONS, WINDOW_EXPANSION_FACTOR
 
 
 def test_window_filtering():
@@ -66,8 +66,9 @@ def test_window_filtering():
             print(f"    期望范围: [{query_val-window_v:.3f}, {query_val+window_v:.3f}]")
             
             # 验证所有候选点都在窗口内
-            in_window = ((candidates >= query_val - window_v * 1.6) & 
-                        (candidates <= query_val + window_v * 1.6)).all()
+            max_expand_factor = WINDOW_EXPANSION_FACTOR ** MAX_WINDOW_EXPANSIONS
+            in_window = ((candidates >= query_val - window_v * max_expand_factor) & 
+                        (candidates <= query_val + window_v * max_expand_factor)).all()
             print(f"    所有候选在窗口内: {in_window.item()}")
     
     # 测试 2D case
@@ -108,11 +109,11 @@ def test_window_filtering():
             print(f"    期望密度: [{query_rho-window_r:.3f}, {query_rho+window_r:.3f}]")
             
             # 验证所有候选点都在窗口内（考虑扩展）
-            max_expand = 1.5 ** 3  # 最多扩展3次
-            ws_in = ((candidates[:, 0] >= query_ws - window_v * max_expand) & 
-                    (candidates[:, 0] <= query_ws + window_v * max_expand)).all()
-            rho_in = ((candidates[:, 1] >= query_rho - window_r * max_expand) & 
-                     (candidates[:, 1] <= query_rho + window_r * max_expand)).all()
+            max_expand_factor = WINDOW_EXPANSION_FACTOR ** MAX_WINDOW_EXPANSIONS
+            ws_in = ((candidates[:, 0] >= query_ws - window_v * max_expand_factor) & 
+                    (candidates[:, 0] <= query_ws + window_v * max_expand_factor)).all()
+            rho_in = ((candidates[:, 1] >= query_rho - window_r * max_expand_factor) & 
+                     (candidates[:, 1] <= query_rho + window_r * max_expand_factor)).all()
             print(f"    风速在窗口内: {ws_in.item()}, 密度在窗口内: {rho_in.item()}")
     
     # 测试边缘情况：候选不足时的自动扩展

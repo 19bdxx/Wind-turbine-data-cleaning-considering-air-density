@@ -133,6 +133,10 @@ def _physics_dir_in_z_batch(Z_b, minmax):
 
 # ===================== 窗口筛选 =====================
 
+# 窗口扩展配置
+MAX_WINDOW_EXPANSIONS = 3  # 最大窗口扩展次数
+WINDOW_EXPANSION_FACTOR = 1.5  # 每次扩展的倍数
+
 def _window_filter_candidates(Zb_t, Xcand_t, window_v, window_r, d, min_candidates, K_NEI):
     """
     对每个查询点，根据风速和密度窗口筛选候选点
@@ -156,7 +160,6 @@ def _window_filter_candidates(Zb_t, Xcand_t, window_v, window_r, d, min_candidat
     
     filtered_indices = []
     expand_count = 0
-    max_expansions = 3
     
     for bi in range(B):
         query_point = Zb_t[bi]  # (d,)
@@ -164,7 +167,7 @@ def _window_filter_candidates(Zb_t, Xcand_t, window_v, window_r, d, min_candidat
         current_window_r = window_r
         expansion = 0
         
-        while expansion <= max_expansions:
+        while expansion <= MAX_WINDOW_EXPANSIONS:
             # 风速维度筛选
             ws_mask = torch.abs(Xcand_t[:, 0] - query_point[0]) <= current_window_v
             
@@ -187,9 +190,9 @@ def _window_filter_candidates(Zb_t, Xcand_t, window_v, window_r, d, min_candidat
             
             # 扩大窗口
             expansion += 1
-            if expansion <= max_expansions:
-                current_window_v *= 1.5
-                current_window_r *= 1.5
+            if expansion <= MAX_WINDOW_EXPANSIONS:
+                current_window_v *= WINDOW_EXPANSION_FACTOR
+                current_window_r *= WINDOW_EXPANSION_FACTOR
         else:
             # 达到最大扩展次数仍不足，使用全部候选
             filtered_indices.append(torch.arange(N, device=device))
@@ -459,8 +462,7 @@ class KNNLocal(ThresholdMethod):
                     
                     # 计算距离
                     if metric == "physics":
-                        Xi_x_single = a_t + b_t * Zb_single
-                        Gx_single = _physics_grad_x_batch(Xi_x_single)
+                        Gx_single = Gx_b_t[bi:bi+1, :]  # 复用已计算的梯度
                         Xx_c_t = a_t + b_t * Xc_t
                         D_row = _distances_chunk("physics", Zb_single, Xc_t,
                                                  lambda_t=lambda_t,
