@@ -103,8 +103,8 @@
     {
       "name": "JMZSFD",
       "csv": "JMZSFD_空气密度_20230921-20240729_1min.csv",
-      "turbine_start": 51,
-      "turbine_end": 58
+      "turbine_start": 55,
+      "turbine_end": 55
     },
     {
       "name": "GRJHFD",
