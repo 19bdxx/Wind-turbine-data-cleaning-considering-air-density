@@ -60,7 +60,12 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 python main.py --config experiments_compare_不同切向比例_分风机_JSMZS51-58.json
 ```
 
-**自动化性能测试**（推荐）:
+**快速性能测试**（推荐，5-10分钟）:
+```bash
+python benchmark_knn.py --quick-test
+```
+
+**完整性能测试**（4-5小时，完整20个runs）:
 ```bash
 python benchmark_knn.py
 ```
