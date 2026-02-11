@@ -1,7 +1,7 @@
 {
   "defaults": {
     "stage1_root": "风机数据",
-    "out_root": "#5_runs_不同切向比例_分风机",
+    "out_root": "#5_runs_knn修改",
     "device": "cuda:0",
     "seed": 42,
     "wind_scope": [
@@ -97,7 +97,7 @@
       "knn_diag_points": 100
     },
     "split_repo": {
-      "dir": "#5_runs_不同切向比例_分风机/_splits",
+      "dir": "#5_runs_knn修改/_splits",
       "key": "v1",
       "load": true,
       "save": true
