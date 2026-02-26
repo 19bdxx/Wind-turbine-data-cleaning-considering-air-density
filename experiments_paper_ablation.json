@@ -59,8 +59,8 @@
     {
       "name": "JMZSFD",
       "csv": "JMZSFD_空气密度_20230921-20240729_1min.csv",
-      "turbine_start": 51,
-      "turbine_end": 58
+      "turbine_auto_discover": true,
+      "_comment": "turbine_auto_discover=true: 自动扫描 stage1_root/{name}/ 目录，处理所有 {name}_N号机_masks.csv 文件；无需手动维护 turbine_start/turbine_end，避免漏处理风机。"
     }
   ],
 

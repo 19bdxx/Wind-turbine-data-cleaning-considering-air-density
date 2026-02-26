@@ -1,6 +1,6 @@
 # stage2_modular/pipeline/orchestrator.py
 # -*- coding: utf-8 -*-
-import os, sys, math, json, gc
+import os, sys, math, json, gc, re, glob
 import numpy as np
 import pandas as pd
 import torch  # <<< 新增：用于 predict_torch 与设备获取
@@ -11,6 +11,26 @@ from ..core.scaler import Scaler
 from ..core.dmode import build_D_np
 from ..models.center import fit_mlp_center, predict_mlp_center
 from ..thresholds.registry import get_method
+
+def _discover_turbine_ids(stage1_dir: str, station: str) -> list:
+    """
+    扫描 stage1_dir，自动发现所有属于该 station 的风机编号。
+
+    查找符合 ``{station}_{N}号机_masks.csv`` 命名规则的文件，
+    提取整数编号 N，按升序排列后返回。
+
+    用于替代 JSON 中显式配置 turbine_start / turbine_end 的方式，
+    避免因配置范围不全而漏处理部分风机。
+    """
+    pattern = os.path.join(stage1_dir, f"{station}_*号机_masks.csv")
+    files = glob.glob(pattern)
+    ids = []
+    _pat = re.compile(rf"{re.escape(station)}_(\d+)号机_masks\.csv$")
+    for f in files:
+        m = _pat.search(os.path.basename(f))
+        if m:
+            ids.append(int(m.group(1)))
+    return sorted(ids)
 
 def _ensure_bool_flags(df_like, cols):
     for c in cols:
@@ -106,7 +126,27 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
         return idx_train, idx_val, idx_test
 
     splits_saved={}
-    for tid in range(int(st_cfg["turbine_start"]), int(st_cfg["turbine_end"])+1):
+
+    # ── 确定要处理的风机编号列表 ──────────────────────────────────────────
+    # 优先级：
+    #   1. turbine_auto_discover=true  → 扫描 stage1_dir 目录，自动发现所有 masks 文件
+    #   2. 仅设置了 turbine_ids 列表   → 直接使用列表
+    #   3. 设置了 turbine_start/end    → range(start, end+1)（兼容原有配置）
+    # 若 auto_discover 为 True 但目录中未找到任何文件，则跳过该站点并给出警告。
+    _auto = bool(st_cfg.get("turbine_auto_discover", False))
+    _explicit_ids = st_cfg.get("turbine_ids", None)
+    if _auto:
+        turbine_ids = _discover_turbine_ids(stage1_dir, station)
+        if not turbine_ids:
+            print(f"  ⚠ [AutoDiscover] 未在 {stage1_dir} 找到任何 {station}_N号机_masks.csv，跳过该站点")
+            return splits_saved
+        print(f"  [AutoDiscover] {station}: 共发现 {len(turbine_ids)} 台风机 → {turbine_ids}")
+    elif _explicit_ids is not None:
+        turbine_ids = [int(x) for x in _explicit_ids]
+    else:
+        turbine_ids = range(int(st_cfg["turbine_start"]), int(st_cfg["turbine_end"]) + 1)
+
+    for tid in turbine_ids:
         print(f">>> 处理 {station} {tid}号机 ..."); sw=Stopwatch()
         label=f"{tid}号机"; in_masks=os.path.join(stage1_dir, f"{station}_{label}_masks.csv")
         if not os.path.exists(in_masks):
