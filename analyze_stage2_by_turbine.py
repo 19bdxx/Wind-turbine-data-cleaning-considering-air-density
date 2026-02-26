@@ -247,22 +247,14 @@ def analyze_one_turbine(run_name: str, fpath: str, cfg: dict, device: str,
         # 没有 rho 列，再按站点 CSV 做左连接
         if station and station in rho_map:
             with Timer("load rho table & merge", debug):
-                rho_tab = load_rho_table(rho_map[station], station)  # -> ['timestamp','rho']
-                # 兜底：统一列名
-                if "timestamp" not in rho_tab.columns:
-                    for cand in ["ts","time","datetime"]:
-                        if cand in rho_tab.columns:
-                            rho_tab = rho_tab.rename(columns={cand:"timestamp"})
-                            break
-                if "rho" not in rho_tab.columns:
-                    for cand in ["density","air_density","rho_kg_m3"]:
-                        if cand in rho_tab.columns:
-                            rho_tab = rho_tab.rename(columns={cand:"rho"})
-                            break
-                # 精确合并；若仍有对齐问题，可换 merge_asof 最近邻
-                df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-                rho_tab["timestamp"] = pd.to_datetime(rho_tab["timestamp"], errors="coerce")
-                df = df.merge(rho_tab[["timestamp","rho"]], on="timestamp", how="left")
+                rho_tab = load_rho_table(rho_map[station], station)  # -> ['timestamp','rho'] or None
+                if rho_tab is None:
+                    log(f"     rho(merged): load_rho_table returned None (no rho column in station CSV)", debug)
+                else:
+                    # 精确合并；若仍有对齐问题，可换 merge_asof 最近邻
+                    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+                    rho_tab["timestamp"] = pd.to_datetime(rho_tab["timestamp"], errors="coerce")
+                    df = df.merge(rho_tab[["timestamp","rho"]], on="timestamp", how="left")
             has_rho = "rho" in df.columns
             if has_rho:
                 df["rho"] = pd.to_numeric(df["rho"], errors="coerce")
@@ -284,7 +276,6 @@ def analyze_one_turbine(run_name: str, fpath: str, cfg: dict, device: str,
     mlp_cfg = dict(cfg["defaults"].get("mlp", {}))
     if fast_epochs is not None and fast_epochs>0:
         mlp_cfg["epochs"] = min(int(mlp_cfg.get("epochs", 300)), int(fast_epochs))  # 仅本次分析限速
-    device = str(resolve_device(cfg["defaults"].get("device", "cuda:0")))
     thr_cfg = cfg["defaults"].get("thresholds", {})
     prated_used = float(estimate_prated_from_series(df[p_col]))
 
