@@ -348,7 +348,7 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
             turb_out=os.path.join(station_out, f"{tid}号机"); os.makedirs(turb_out, exist_ok=True)
             out_csv=os.path.join(turb_out, f"{station}_{label}_stage2_mlp.csv")
             df_out.to_csv(out_csv, index=False, encoding="utf-8-sig")
-            return {}
+            continue
 
         # === 阈值尺度 D（基于 Pass1 的预测） ===
         pr_used = prated_raw if math.isfinite(prated_raw) else float(np.nanmax(S["power"]))
