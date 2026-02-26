@@ -157,6 +157,7 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
         else:
             strategy = split_cfg.get("strategy","shuffle")
             ratio    = tuple(split_cfg.get("ratio",[0.8,0.2,0.0]))
+            _did_custom_split = False
             if strategy=="time":
                 idx_ordered=S.sort_values("timestamp").index.values
             elif strategy=="shuffle":
@@ -173,18 +174,44 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
                     rng=np.random.default_rng(seed); rng.shuffle(blocks)
                     out_idx=[S2.loc[S2["_block"]==b,"index"].to_numpy() for b in blocks]
                     idx_ordered=np.concatenate(out_idx, axis=0)
+            elif strategy=="seasonal":
+                # 按季节划分：指定 test_seasons 作为测试集，val 从训练集随机抽取
+                _SEASON_MAP={1:"Winter",2:"Winter",3:"Spring",4:"Spring",
+                             5:"Spring",6:"Summer",7:"Summer",8:"Summer",
+                             9:"Fall",10:"Fall",11:"Fall",12:"Winter"}
+                test_seasons=set(split_cfg.get("test_seasons",["Winter"]))
+                ts=pd.to_datetime(S["timestamp"], errors="coerce")
+                season_labels=ts.dt.month.map(_SEASON_MAP)
+                test_mask=season_labels.isin(test_seasons)
+                idx_test=S.index[test_mask].values
+                remain=S.index[~test_mask].values
+                val_frac=float(ratio[1]/(ratio[0]+ratio[1])) if (ratio[0]+ratio[1])>1e-12 else 0.2
+                rng=np.random.default_rng(seed); rng.shuffle(remain)
+                i_va=int(round(val_frac*len(remain)))
+                idx_val=remain[:i_va]; idx_train=remain[i_va:]
+                splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
+                try:
+                    if split_save:
+                        row_keys=make_row_keys(S)
+                        os.makedirs(os.path.dirname(split_path), exist_ok=True)
+                        save_split_csv(split_path, row_keys, idx_train, idx_val, idx_test)
+                        print(f"[Split] persisted to: {split_path}")
+                except Exception as e:
+                    print(f"[Split] failed to save persisted split ({split_path}): {e}")
+                _did_custom_split = True
             else:
                 raise ValueError(f"未知 SPLIT_STRATEGY={strategy}")
-            idx_train,idx_val,idx_test=split_indices_by_ratio(idx_ordered, ratio)
-            try:
-                if split_save:
-                    row_keys = make_row_keys(S)
-                    os.makedirs(os.path.dirname(split_path), exist_ok=True)
-                    save_split_csv(split_path, row_keys, idx_train, idx_val, idx_test)
-                    print(f"[Split] persisted to: {split_path}")
-            except Exception as e:
-                print(f"[Split] failed to save persisted split ({split_path}): {e}")
-            splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
+            if not _did_custom_split:
+                idx_train,idx_val,idx_test=split_indices_by_ratio(idx_ordered, ratio)
+                try:
+                    if split_save:
+                        row_keys = make_row_keys(S)
+                        os.makedirs(os.path.dirname(split_path), exist_ok=True)
+                        save_split_csv(split_path, row_keys, idx_train, idx_val, idx_test)
+                        print(f"[Split] persisted to: {split_path}")
+                except Exception as e:
+                    print(f"[Split] failed to save persisted split ({split_path}): {e}")
+                splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
         sw.lap("split index")
 
         S["_split"] = pd.Series(pd.NA, index=S.index, dtype="string")
