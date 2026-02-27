@@ -130,6 +130,7 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
     # ── 确定要处理的风机编号列表 ──────────────────────────────────────────
     # 优先级：
     #   1. turbine_auto_discover=true  → 扫描 stage1_dir 目录，自动发现所有 masks 文件
+    #      可同时配置 turbine_start / turbine_end 对结果进行范围过滤
     #   2. 仅设置了 turbine_ids 列表   → 直接使用列表
     #   3. 设置了 turbine_start/end    → range(start, end+1)（兼容原有配置）
     # 若 auto_discover 为 True 但目录中未找到任何文件，则跳过该站点并给出警告。
@@ -141,6 +142,15 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
             print(f"  ⚠ [AutoDiscover] 未在 {stage1_dir} 找到任何 {station}_N号机_masks.csv，跳过该站点")
             return splits_saved
         print(f"  [AutoDiscover] {station}: 共发现 {len(turbine_ids)} 台风机 → {turbine_ids}")
+        # 若同时配置了 turbine_start / turbine_end，则进一步过滤
+        _ts = st_cfg.get("turbine_start", None)
+        _te = st_cfg.get("turbine_end", None)
+        if _ts is not None or _te is not None:
+            # turbine_ids 在此处非空（上方已做空检测并 return），可安全取首尾作为缺省端点
+            _lo = int(_ts) if _ts is not None else min(turbine_ids)
+            _hi = int(_te) if _te is not None else max(turbine_ids)
+            turbine_ids = [t for t in turbine_ids if _lo <= t <= _hi]
+            print(f"  [AutoDiscover] 按 turbine_start={_lo} / turbine_end={_hi} 过滤后: {len(turbine_ids)} 台 → {turbine_ids}")
     elif _explicit_ids is not None:
         turbine_ids = [int(x) for x in _explicit_ids]
     else:

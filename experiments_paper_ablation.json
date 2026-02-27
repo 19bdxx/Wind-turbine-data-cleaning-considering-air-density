@@ -60,7 +60,7 @@
       "name": "JMZSFD",
       "csv": "JMZSFD_空气密度_20230921-20240729_1min.csv",
       "turbine_auto_discover": true,
-      "_comment": "turbine_auto_discover=true: 自动扫描 stage1_root/{name}/ 目录，处理所有 {name}_N号机_masks.csv 文件；无需手动维护 turbine_start/turbine_end，避免漏处理风机。"
+      "_comment": "turbine_auto_discover=true: 自动扫描 stage1_root/{name}/ 目录，处理所有 {name}_N号机_masks.csv 文件。可同时配置 turbine_start / turbine_end 对自动发现的结果做范围过滤（两端均含），从而精确控制处理哪些风机而无需手动枚举。"
     }
   ],
 

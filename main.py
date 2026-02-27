@@ -18,7 +18,12 @@ def main():
     print("========== 实验计划 ==========")
     print(f"站点数量: {len(stations)}")
     for i,st in enumerate(stations,1):
-        print(f"  [{i}] {st['name']}  CSV={st['csv']}  turbines={st['turbine_start']}..{st['turbine_end']}")
+        if st.get("turbine_auto_discover"):
+            _ts = st.get("turbine_start", "auto")
+            _te = st.get("turbine_end", "auto")
+            print(f"  [{i}] {st['name']}  CSV={st['csv']}  turbines=auto_discover[{_ts}..{_te}]")
+        else:
+            print(f"  [{i}] {st['name']}  CSV={st['csv']}  turbines={st['turbine_start']}..{st['turbine_end']}")
     print(f"Run 数量: {len(runs)}")
     # 输出 run 的数量，并逐个 run 打印关键信息
     for i,r in enumerate(runs,1):
