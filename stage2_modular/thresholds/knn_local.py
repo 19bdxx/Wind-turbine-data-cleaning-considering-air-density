@@ -274,9 +274,11 @@ class KNNLocal(ThresholdMethod):
                 _fail("grad_eps must be scalar or array with >=1 elements", grad_eps=grad_eps)
 
         # ========= 设备 =========
-        req_cuda = str(device).lower().startswith("cuda")
+        dev_str = str(device).lower()
+        req_cuda = dev_str.startswith("cuda")
+        auto_mode = dev_str == "auto"
         cuda_ok = torch.cuda.is_available()
-        use_gpu = (req_cuda and cuda_ok)
+        use_gpu = (req_cuda and cuda_ok) or (auto_mode and cuda_ok)
         torch_device = torch.device("cuda") if use_gpu else torch.device("cpu")
         if req_cuda and not cuda_ok:
             _fail("device='cuda' but torch.cuda.is_available()==False —— 请检查CUDA驱动/PyTorch GPU版/CUDA_VISIBLE_DEVICES")
