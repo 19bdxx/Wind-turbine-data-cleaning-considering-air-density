@@ -99,7 +99,8 @@ def _autograd_grad_z_batch(torch_predict, Zb_t):
     with torch.enable_grad():
         out = torch_predict(Zb_t)  # (B,)
         assert out.shape == (B,), f"torch_predict must return (B,), got {tuple(out.shape)}"
-        out.sum().backward()
+        if out.requires_grad:
+            out.sum().backward()
     G = Zb_t.grad
     if G is None:
         G = torch.zeros(B, d, dtype=Zb_t.dtype, device=Zb_t.device)
