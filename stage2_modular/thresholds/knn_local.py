@@ -114,8 +114,8 @@ def _physics_dir_in_z_batch(Z_b, minmax):
     """
     Z_b = np.asarray(Z_b, float)
     B, d = Z_b.shape
-    a = np.asarray(minmax.get("a") or minmax.get("A"), float).ravel()
-    b = np.asarray(minmax.get("b") or minmax.get("B"), float).ravel()
+    a = np.asarray(minmax["a"] if "a" in minmax else minmax["A"], float).ravel()
+    b = np.asarray(minmax["b"] if "b" in minmax else minmax["B"], float).ravel()
     if a.size == 1: a = np.full((d,), float(a[0]), dtype=float)
     if b.size == 1: b = np.full((d,), float(b[0]), dtype=float)
     if a.size != d or b.size != d:
@@ -261,8 +261,8 @@ class KNNLocal(ThresholdMethod):
             if not (isinstance(mm, dict) and (("a" in mm) or ("A" in mm)) and (("b" in mm) or ("B" in mm))):
                 _fail("minmax is missing for physics metric",
                       minmax_type=type(mm), minmax_keys=list(mm.keys()) if isinstance(mm, dict) else None)
-            a = np.asarray(mm.get("a") or mm.get("A"), float).ravel()
-            b = np.asarray(mm.get("b") or mm.get("B"), float).ravel()
+            a = np.asarray(mm["a"] if "a" in mm else mm["A"], float).ravel()
+            b = np.asarray(mm["b"] if "b" in mm else mm["B"], float).ravel()
             if a.size == 1: a = np.full((d,), float(a[0]), dtype=float)
             if b.size == 1: b = np.full((d,), float(b[0]), dtype=float)
             if a.size != d or b.size != d:
@@ -298,8 +298,8 @@ class KNNLocal(ThresholdMethod):
         # ========= physics 常量 =========
         a_t = b_t = None
         if metric == "physics":
-            a_np = np.asarray(minmax.get("a") or minmax.get("A"), float).ravel()
-            b_np = np.asarray(minmax.get("b") or minmax.get("B"), float).ravel()
+            a_np = np.asarray(minmax["a"] if "a" in minmax else minmax["A"], float).ravel()
+            b_np = np.asarray(minmax["b"] if "b" in minmax else minmax["B"], float).ravel()
             if a_np.size == 1: a_np = np.full((d,), float(a_np[0]), dtype=float)
             if b_np.size == 1: b_np = np.full((d,), float(b_np[0]), dtype=float)
             a_t = torch.as_tensor(a_np.reshape(1, -1), dtype=torch.float32, device=torch_device)
