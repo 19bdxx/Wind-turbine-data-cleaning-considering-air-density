@@ -33,7 +33,7 @@
     },
     "thresholds": {
       "method": "knn",
-      "metric": "tanorm",
+      "metric": "grad_dir",
       "lambda_t": 6.0,
       "grad_mode": "auto",
       "grad_eps": [0.1, 0.01],
@@ -85,7 +85,7 @@
       "rho_for_model": false,
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "physics"
       }
@@ -101,7 +101,7 @@
       "rho_for_model": true,
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "physics"
       }
@@ -117,7 +117,7 @@
       "rho_for_model": false,
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "physics"
       }
@@ -133,7 +133,7 @@
       "rho_for_model": true,
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "auto",
         "grad_eps": [0.1, 0.01]
@@ -151,7 +151,7 @@
       "rho_input_mode": "shuffle",
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "auto",
         "grad_eps": [0.1, 0.01]
@@ -170,7 +170,7 @@
       "rho_constant_value": "train_mean",
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "auto",
         "grad_eps": [0.1, 0.01]
@@ -191,7 +191,7 @@
       },
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "auto",
         "grad_eps": [0.1, 0.01]
@@ -212,7 +212,7 @@
       },
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "physics"
       }
@@ -228,7 +228,7 @@
       "rho_for_model": true,
       "thresholds": {
         "method": "knn",
-        "metric": "tanorm",
+        "metric": "grad_dir",
         "lambda_t": 6.0,
         "grad_mode": "auto",
         "grad_eps": [0.1, 0.01]
