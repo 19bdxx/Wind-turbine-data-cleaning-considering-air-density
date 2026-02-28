@@ -1,6 +1,6 @@
 # stage2_modular/pipeline/orchestrator.py
 # -*- coding: utf-8 -*-
-import os, sys, math, json, gc
+import os, sys, math, json, gc, re, glob
 import numpy as np
 import pandas as pd
 import torch  # <<< 新增：用于 predict_torch 与设备获取
@@ -11,6 +11,26 @@ from ..core.scaler import Scaler
 from ..core.dmode import build_D_np
 from ..models.center import fit_mlp_center, predict_mlp_center
 from ..thresholds.registry import get_method
+
+def _discover_turbine_ids(stage1_dir: str, station: str) -> list:
+    """
+    扫描 stage1_dir，自动发现所有属于该 station 的风机编号。
+
+    查找符合 ``{station}_{N}号机_masks.csv`` 命名规则的文件，
+    提取整数编号 N，按升序排列后返回。
+
+    用于替代 JSON 中显式配置 turbine_start / turbine_end 的方式，
+    避免因配置范围不全而漏处理部分风机。
+    """
+    pattern = os.path.join(stage1_dir, f"{station}_*号机_masks.csv")
+    files = glob.glob(pattern)
+    ids = []
+    _pat = re.compile(rf"{re.escape(station)}_(\d+)号机_masks\.csv$")
+    for f in files:
+        m = _pat.search(os.path.basename(f))
+        if m:
+            ids.append(int(m.group(1)))
+    return sorted(ids)
 
 def _ensure_bool_flags(df_like, cols):
     for c in cols:
@@ -106,7 +126,37 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
         return idx_train, idx_val, idx_test
 
     splits_saved={}
-    for tid in range(int(st_cfg["turbine_start"]), int(st_cfg["turbine_end"])+1):
+
+    # ── 确定要处理的风机编号列表 ──────────────────────────────────────────
+    # 优先级：
+    #   1. turbine_auto_discover=true  → 扫描 stage1_dir 目录，自动发现所有 masks 文件
+    #      可同时配置 turbine_start / turbine_end 对结果进行范围过滤
+    #   2. 仅设置了 turbine_ids 列表   → 直接使用列表
+    #   3. 设置了 turbine_start/end    → range(start, end+1)（兼容原有配置）
+    # 若 auto_discover 为 True 但目录中未找到任何文件，则跳过该站点并给出警告。
+    _auto = bool(st_cfg.get("turbine_auto_discover", False))
+    _explicit_ids = st_cfg.get("turbine_ids", None)
+    if _auto:
+        turbine_ids = _discover_turbine_ids(stage1_dir, station)
+        if not turbine_ids:
+            print(f"  ⚠ [AutoDiscover] 未在 {stage1_dir} 找到任何 {station}_N号机_masks.csv，跳过该站点")
+            return splits_saved
+        print(f"  [AutoDiscover] {station}: 共发现 {len(turbine_ids)} 台风机 → {turbine_ids}")
+        # 若同时配置了 turbine_start / turbine_end，则进一步过滤
+        _ts = st_cfg.get("turbine_start", None)
+        _te = st_cfg.get("turbine_end", None)
+        if _ts is not None or _te is not None:
+            # turbine_ids 在此处非空（上方已做空检测并 return），可安全取首尾作为缺省端点
+            _lo = int(_ts) if _ts is not None else min(turbine_ids)
+            _hi = int(_te) if _te is not None else max(turbine_ids)
+            turbine_ids = [t for t in turbine_ids if _lo <= t <= _hi]
+            print(f"  [AutoDiscover] 按 turbine_start={_lo} / turbine_end={_hi} 过滤后: {len(turbine_ids)} 台 → {turbine_ids}")
+    elif _explicit_ids is not None:
+        turbine_ids = [int(x) for x in _explicit_ids]
+    else:
+        turbine_ids = range(int(st_cfg["turbine_start"]), int(st_cfg["turbine_end"]) + 1)
+
+    for tid in turbine_ids:
         print(f">>> 处理 {station} {tid}号机 ..."); sw=Stopwatch()
         label=f"{tid}号机"; in_masks=os.path.join(stage1_dir, f"{station}_{label}_masks.csv")
         if not os.path.exists(in_masks):
@@ -157,6 +207,7 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
         else:
             strategy = split_cfg.get("strategy","shuffle")
             ratio    = tuple(split_cfg.get("ratio",[0.8,0.2,0.0]))
+            _did_custom_split = False
             if strategy=="time":
                 idx_ordered=S.sort_values("timestamp").index.values
             elif strategy=="shuffle":
@@ -173,18 +224,44 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
                     rng=np.random.default_rng(seed); rng.shuffle(blocks)
                     out_idx=[S2.loc[S2["_block"]==b,"index"].to_numpy() for b in blocks]
                     idx_ordered=np.concatenate(out_idx, axis=0)
+            elif strategy=="seasonal":
+                # 按季节划分：指定 test_seasons 作为测试集，val 从训练集随机抽取
+                _SEASON_MAP={1:"Winter",2:"Winter",3:"Spring",4:"Spring",
+                             5:"Spring",6:"Summer",7:"Summer",8:"Summer",
+                             9:"Fall",10:"Fall",11:"Fall",12:"Winter"}
+                test_seasons=set(split_cfg.get("test_seasons",["Winter"]))
+                ts=pd.to_datetime(S["timestamp"], errors="coerce")
+                season_labels=ts.dt.month.map(_SEASON_MAP)
+                test_mask=season_labels.isin(test_seasons)
+                idx_test=S.index[test_mask].values
+                remain=S.index[~test_mask].values
+                val_frac=float(ratio[1]/(ratio[0]+ratio[1])) if (ratio[0]+ratio[1])>1e-12 else 0.2
+                rng=np.random.default_rng(seed); rng.shuffle(remain)
+                i_va=int(round(val_frac*len(remain)))
+                idx_val=remain[:i_va]; idx_train=remain[i_va:]
+                splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
+                try:
+                    if split_save:
+                        row_keys=make_row_keys(S)
+                        os.makedirs(os.path.dirname(split_path), exist_ok=True)
+                        save_split_csv(split_path, row_keys, idx_train, idx_val, idx_test)
+                        print(f"[Split] persisted to: {split_path}")
+                except Exception as e:
+                    print(f"[Split] failed to save persisted split ({split_path}): {e}")
+                _did_custom_split = True
             else:
                 raise ValueError(f"未知 SPLIT_STRATEGY={strategy}")
-            idx_train,idx_val,idx_test=split_indices_by_ratio(idx_ordered, ratio)
-            try:
-                if split_save:
-                    row_keys = make_row_keys(S)
-                    os.makedirs(os.path.dirname(split_path), exist_ok=True)
-                    save_split_csv(split_path, row_keys, idx_train, idx_val, idx_test)
-                    print(f"[Split] persisted to: {split_path}")
-            except Exception as e:
-                print(f"[Split] failed to save persisted split ({split_path}): {e}")
-            splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
+            if not _did_custom_split:
+                idx_train,idx_val,idx_test=split_indices_by_ratio(idx_ordered, ratio)
+                try:
+                    if split_save:
+                        row_keys = make_row_keys(S)
+                        os.makedirs(os.path.dirname(split_path), exist_ok=True)
+                        save_split_csv(split_path, row_keys, idx_train, idx_val, idx_test)
+                        print(f"[Split] persisted to: {split_path}")
+                except Exception as e:
+                    print(f"[Split] failed to save persisted split ({split_path}): {e}")
+                splits_saved[(station,label)]=(idx_train,idx_val,idx_test)
         sw.lap("split index")
 
         S["_split"] = pd.Series(pd.NA, index=S.index, dtype="string")
@@ -281,7 +358,7 @@ def run_stage2_for_station(st_cfg, global_cfg, run_cfg, reuse_split=None):
             turb_out=os.path.join(station_out, f"{tid}号机"); os.makedirs(turb_out, exist_ok=True)
             out_csv=os.path.join(turb_out, f"{station}_{label}_stage2_mlp.csv")
             df_out.to_csv(out_csv, index=False, encoding="utf-8-sig")
-            return {}
+            continue
 
         # === 阈值尺度 D（基于 Pass1 的预测） ===
         pr_used = prated_raw if math.isfinite(prated_raw) else float(np.nanmax(S["power"]))

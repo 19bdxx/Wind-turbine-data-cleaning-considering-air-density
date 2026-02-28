@@ -1,0 +1,238 @@
+{
+  "_comment": "论文消融实验配置：系统性对比空气密度对清洗和建模的贡献",
+  "defaults": {
+    "stage1_root": "风机数据",
+    "out_root": "paper_ablation_runs",
+    "device": "auto",
+    "seed": 42,
+    "wind_scope": [0.0, 15.0],
+    "min_train_samples": 1000,
+    "gpu_cache_mib": 20480,
+    "split": {
+      "_comment": "train/val/test = 70/15/15; val drives early stopping, test is the final metric set. The third ratio is a flag (>1e-12 means include test); actual test data = remainder after val slice.",
+      "strategy": "shuffle",
+      "ratio": [0.70, 0.15, 0.15]
+    },
+    "scaler": {
+      "method": "minmax",
+      "fixed": true,
+      "wind_range": [0, 15],
+      "rho_range": [1.07, 1.37]
+    },
+    "mlp": {
+      "hidden": [512, 512, 256, 128],
+      "act": "relu",
+      "dropout": 0.05,
+      "l2": 0.0,
+      "lr": 0.001,
+      "batch": 65536,
+      "epochs": 300,
+      "patience": 20,
+      "loss": "mse",
+      "huber_delta_z": 1.0
+    },
+    "thresholds": {
+      "method": "knn",
+      "metric": "grad_dir",
+      "lambda_t": 6.0,
+      "grad_mode": "auto",
+      "grad_eps": [0.1, 0.01],
+      "k_nei": 500,
+      "tau_hi": 0.98,
+      "tau_lo": 0.98,
+      "eps_ratio": 0.05,
+      "delta_power": 50.0,
+      "D_mode": "pred_or_both",
+      "physics_relative": true
+    },
+    "rho_shuffle": {"seed": 2024, "granularity": "split"},
+    "rho_constant_value": "train_mean",
+    "split_repo": {
+      "dir": "paper_ablation_runs/_splits",
+      "key": "v2",
+      "load": true,
+      "save": true
+    }
+  },
+
+  "stations": [
+    {
+      "name": "JMZSFD",
+      "csv": "JMZSFD_空气密度_20230921-20240729_1min.csv",
+      "turbine_auto_discover": true,
+      "_comment": "turbine_auto_discover=true: 自动扫描 stage1_root/{name}/ 目录，处理所有 {name}_N号机_masks.csv 文件。可同时配置 turbine_start / turbine_end 对自动发现的结果做范围过滤（两端均含），从而精确控制处理哪些风机而无需手动枚举。"
+    }
+  ],
+
+  "runs": [
+
+    {
+      "_comment": "A: 仅规则清洗，无模型清洗（基准线）",
+      "name": "A_rules_only",
+      "out_subdir": "A_rules_only",
+      "cleaning_passes": 0,
+      "rho_for_clean": false,
+      "rho_for_model": false
+    },
+
+    {
+      "_comment": "B: 无空气密度——清洗和建模均不使用 rho",
+      "name": "B_no_rho",
+      "out_subdir": "B_no_rho",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": false,
+      "rho_for_model": false,
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "physics"
+      }
+    },
+
+    {
+      "_comment": "C: 仅模型使用 rho（清洗不用）",
+      "name": "C_rho_model_only",
+      "out_subdir": "C_rho_model_only",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": false,
+      "rho_for_model": true,
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "physics"
+      }
+    },
+
+    {
+      "_comment": "D: 仅清洗使用 rho（模型不用）",
+      "name": "D_rho_clean_only",
+      "out_subdir": "D_rho_clean_only",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": true,
+      "rho_for_model": false,
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "physics"
+      }
+    },
+
+    {
+      "_comment": "E: 清洗和建模均使用 rho（完整方案）",
+      "name": "E_rho_both",
+      "out_subdir": "E_rho_both",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": true,
+      "rho_for_model": true,
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "auto",
+        "grad_eps": [0.1, 0.01]
+      }
+    },
+
+    {
+      "_comment": "F: rho shuffle 消融——验证 rho 信息是否真正有用（非乱序假象）",
+      "name": "F_rho_shuffle",
+      "out_subdir": "F_rho_shuffle",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": true,
+      "rho_for_model": true,
+      "rho_input_mode": "shuffle",
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "auto",
+        "grad_eps": [0.1, 0.01]
+      }
+    },
+
+    {
+      "_comment": "G: rho constant 消融——以训练集均值替代 rho，验证密度变化的作用",
+      "name": "G_rho_constant",
+      "out_subdir": "G_rho_constant",
+      "cleaning_passes": 2,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": true,
+      "rho_for_model": true,
+      "rho_input_mode": "constant",
+      "rho_constant_value": "train_mean",
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "auto",
+        "grad_eps": [0.1, 0.01]
+      }
+    },
+
+    {
+      "_comment": "H: 季节泛化测试——以冬季为测试集，验证模型跨季节稳健性",
+      "name": "H_seasonal_winter_test",
+      "out_subdir": "H_seasonal_winter_test",
+      "cleaning_passes": 2,
+      "rho_for_clean": true,
+      "rho_for_model": true,
+      "split": {
+        "strategy": "seasonal",
+        "test_seasons": ["Winter"],
+        "ratio": [0.8, 0.2, 0.0]
+      },
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "auto",
+        "grad_eps": [0.1, 0.01]
+      }
+    },
+
+    {
+      "_comment": "I: 季节泛化测试（无 rho 基准）——以冬季为测试集",
+      "name": "I_seasonal_winter_test_no_rho",
+      "out_subdir": "I_seasonal_winter_test_no_rho",
+      "cleaning_passes": 2,
+      "rho_for_clean": false,
+      "rho_for_model": false,
+      "split": {
+        "strategy": "seasonal",
+        "test_seasons": ["Winter"],
+        "ratio": [0.8, 0.2, 0.0]
+      },
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "physics"
+      }
+    },
+
+    {
+      "_comment": "J: 单次清洗（cleaning_passes=1）消融，与两次清洗对比",
+      "name": "J_one_pass_rho_both",
+      "out_subdir": "J_one_pass_rho_both",
+      "cleaning_passes": 1,
+      "reuse_split_from": "A_rules_only",
+      "rho_for_clean": true,
+      "rho_for_model": true,
+      "thresholds": {
+        "method": "knn",
+        "metric": "grad_dir",
+        "lambda_t": 6.0,
+        "grad_mode": "auto",
+        "grad_eps": [0.1, 0.01]
+      }
+    }
+  ]
+}
